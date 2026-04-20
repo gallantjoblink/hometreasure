@@ -1,0 +1,140 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the platform, can be a customer or a seller/admin.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["customer", "seller", "admin"], "description": "Role of the user" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "name", "role", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "A used good listing by a seller, can contain one or multiple items.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string", "description": "Primary category ID" },
+        "price": { "type": "number", "description": "Total or primary price" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "specs": { "type": "object", "description": "Primary category specific specifications" },
+        "isMultiItem": { "type": "boolean", "description": "Whether this listing contains multiple items" },
+        "items": { 
+          "type": "array", 
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "category": { "type": "string" },
+              "specs": { "type": "object" },
+              "price": { "type": "number" },
+              "images": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "status": { "type": "string", "enum": ["available", "reserved", "sold"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sellerId", "title", "description", "category", "price", "status", "createdAt"]
+    },
+    "QuoteRequest": {
+      "title": "QuoteRequest",
+      "description": "A request for a quote from a customer to a seller.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "replied", "accepted", "rejected"] },
+        "quotePrice": { "type": "number", "description": "Price offered by seller" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "customerId", "sellerId", "message", "status", "createdAt"]
+    },
+    "TransactionNotification": {
+      "title": "TransactionNotification",
+      "description": "A notification about a successful transaction to build trust.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "productTitle": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "productTitle", "sellerName", "message", "createdAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A transaction process after a quote is accepted.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "quoteId": { "type": "string" },
+        "phase": { "type": "string", "enum": ["in_progress", "completed", "return"] },
+        "status": { "type": "string", "description": "Specific status within the phase" },
+        "trackingNumber": { "type": "string" },
+        "courier": { "type": "string" },
+        "finalPrice": { "type": "number" },
+        "adminMessage": { "type": "string" },
+        "sellerAccepted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "sellerId", "quoteId", "phase", "status", "createdAt", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "A hierarchical category for products.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "parentId": { "type": "string", "description": "ID of the parent category" },
+        "level": { "type": "number", "description": "Hierarchy level (1, 2, or 3)" },
+        "fields": { "type": "array", "description": "Custom fields for this category (usually at level 3)" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "level", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Products listed for sale"
+    },
+    "/quoteRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/QuoteRequest" },
+      "description": "Quote requests from customers"
+    },
+    "/transactionNotifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/TransactionNotification" },
+      "description": "Public transaction notifications"
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Transaction lifecycle tracking"
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Product categories"
+    }
+  }
+}

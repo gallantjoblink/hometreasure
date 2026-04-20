@@ -1,0 +1,262 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required, immutable)
+    //   - email: string (required)
+    //   - name: string (required)
+    //   - role: string (required, enum: ['customer', 'seller', 'admin'])
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: products
+    // Document ID: {productId}
+    // Fields:
+    //   - sellerId: string (required, immutable)
+    //   - title: string (required)
+    //   - description: string (required)
+    //   - category: string (required)
+    //   - price: number (required)
+    //   - images: list (optional)
+    //   - specs: map (optional)
+    //   - status: string (required, enum: ['available', 'reserved', 'sold'])
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: quoteRequests
+    // Document ID: {requestId}
+    // Fields:
+    //   - productId: string (required, immutable)
+    //   - customerId: string (required, immutable)
+    //   - sellerId: string (required, immutable)
+    //   - message: string (required)
+    //   - status: string (required, enum: ['pending', 'replied', 'accepted', 'rejected'])
+    //   - quotePrice: number (optional)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: transactionNotifications
+    // Document ID: {notificationId}
+    // Fields:
+    //   - productId: string (required, immutable)
+    //   - productTitle: string (required, immutable)
+    //   - sellerName: string (required, immutable)
+    //   - message: string (required, immutable)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: transactions
+    // Document ID: {transactionId}
+    // Fields:
+    //   - productId: string (required, immutable)
+    //   - sellerId: string (required, immutable)
+    //   - quoteId: string (required, immutable)
+    //   - phase: string (required, enum: ['in_progress', 'completed', 'return'])
+    //   - status: string (required)
+    //   - trackingNumber: string (optional)
+    //   - courier: string (optional)
+    //   - finalPrice: number (optional)
+    //   - adminMessage: string (optional)
+    //   - sellerAccepted: bool (optional)
+    //   - createdAt: timestamp (required, immutable)
+    //   - updatedAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email in ["gallantsystem@gmail.com", "gallantjoblink@gmail.com"] && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isSeller() {
+      return isAuthenticated() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'seller')
+      );
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'name', 'role', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             data.email is string && isValidEmail(data.email) && data.email.size() < 150 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role in ['customer', 'seller', 'admin'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidProduct(data) {
+      let allowedFields = ['sellerId', 'title', 'description', 'category', 'price', 'images', 'specs', 'status', 'createdAt'];
+      return request.resource.data.keys().hasAll(['sellerId', 'title', 'description', 'category', 'price', 'status', 'createdAt']) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             data.sellerId is string && data.sellerId.size() > 0 && data.sellerId.size() < 100 &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.description is string && data.description.size() < 5000 &&
+             data.category is string && data.category.size() > 0 && data.category.size() < 50 &&
+             data.price is number && data.price >= 0 &&
+             (!('images' in data) || (data.images is list && data.images.size() <= 10)) &&
+             (!('specs' in data) || data.specs is map) &&
+             data.status in ['available', 'reserved', 'sold'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidQuoteRequest(data) {
+      let allowedFields = ['productId', 'adminId', 'sellerId', 'message', 'status', 'quotePrice', 'createdAt', 'counterPrice', 'counterMessage', 'secondQuotePrice', 'secondQuoteMessage', 'iteration'];
+      return request.resource.data.keys().hasAll(['productId', 'adminId', 'sellerId', 'status', 'quotePrice', 'createdAt']) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             data.productId is string && data.productId.size() > 0 && data.productId.size() < 100 &&
+             data.adminId is string && data.adminId.size() > 0 && data.adminId.size() < 100 &&
+             data.sellerId is string && data.sellerId.size() > 0 && data.sellerId.size() < 100 &&
+             (!('message' in data) || (data.message is string && data.message.size() < 2000)) &&
+             data.status in ['quoted', 'counter_offered', 'second_quoted', 'accepted', 'rejected', 'do_not_buy'] &&
+             data.quotePrice is number && data.quotePrice >= 0 &&
+             (!('counterPrice' in data) || (data.counterPrice is number && data.counterPrice >= 0)) &&
+             (!('counterMessage' in data) || (data.counterMessage is string && data.counterMessage.size() < 2000)) &&
+             (!('secondQuotePrice' in data) || (data.secondQuotePrice is number && data.secondQuotePrice >= 0)) &&
+             (!('secondQuoteMessage' in data) || (data.secondQuoteMessage is string && data.secondQuoteMessage.size() < 2000)) &&
+             (!('iteration' in data) || data.iteration is number) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTransactionNotification(data) {
+      return hasOnlyAllowedFields(['productId', 'productTitle', 'sellerName', 'message', 'createdAt']) &&
+             data.productId is string && data.productId.size() > 0 && data.productId.size() < 100 &&
+             data.productTitle is string && data.productTitle.size() > 0 && data.productTitle.size() < 200 &&
+             data.sellerName is string && data.sellerName.size() > 0 && data.sellerName.size() < 100 &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 500 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidCategory(data) {
+      let allowedFields = ['name', 'parentId', 'level', 'fields', 'createdAt', 'updatedAt', 'order'];
+      let requiredFields = ['name', 'level'];
+      return data.keys().hasAll(requiredFields) &&
+             data.keys().hasOnly(allowedFields) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.level is number && data.level >= 1 && data.level <= 3 &&
+             (!('parentId' in data) || data.parentId == null || (data.parentId is string && data.parentId.size() > 0)) &&
+             (!('fields' in data) || (data.fields is list && data.fields.size() <= 50)) &&
+             (!('createdAt' in data) || data.createdAt is timestamp) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('order' in data) || data.order is number);
+    }
+
+    function isValidTransaction(data) {
+      let allowedFields = ['productId', 'sellerId', 'quoteId', 'phase', 'status', 'trackingNumber', 'courier', 'finalPrice', 'adminMessage', 'sellerAccepted', 'createdAt', 'updatedAt', 'finalOfferImage', 'finalOfferImages'];
+      return request.resource.data.keys().hasAll(['productId', 'sellerId', 'quoteId', 'phase', 'status', 'createdAt', 'updatedAt']) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             data.productId is string &&
+             data.sellerId is string &&
+             data.quoteId is string &&
+             data.phase in ['in_progress', 'completed', 'return'] &&
+             data.status is string &&
+             (!('trackingNumber' in data) || data.trackingNumber is string) &&
+             (!('courier' in data) || data.courier is string) &&
+             (!('finalPrice' in data) || data.finalPrice is number) &&
+             (!('adminMessage' in data) || data.adminMessage is string) &&
+             (!('sellerAccepted' in data) || data.sellerAccepted is bool) &&
+             (!('finalOfferImage' in data) || data.finalOfferImage is string) &&
+             (!('finalOfferImages' in data) || data.finalOfferImages is list) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidCategory(request.resource.data) && 
+                    'createdAt' in request.resource.data;
+      allow update: if isAdmin() && isValidCategory(request.resource.data) &&
+                    (!('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated(); // Allow reading user profiles (e.g., to see seller name)
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) &&
+                    (request.resource.data.role == 'customer' || isAdmin()); // Only admin can create sellers/admins, others default to customer
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) &&
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.createdAt == resource.data.createdAt &&
+                    (
+                      (isOwner(userId) && request.resource.data.role == resource.data.role) || 
+                      isAdmin()
+                    );
+    }
+
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow create: if isSeller() && isValidProduct(request.resource.data) &&
+                    request.resource.data.sellerId == request.auth.uid;
+      allow update: if (isSeller() && isValidProduct(request.resource.data) &&
+                    resource.data.sellerId == request.auth.uid &&
+                    request.resource.data.sellerId == resource.data.sellerId &&
+                    request.resource.data.createdAt == resource.data.createdAt) || isAdmin();
+      allow delete: if (isSeller() && resource.data.sellerId == request.auth.uid) || isAdmin();
+    }
+
+    match /quoteRequests/{requestId} {
+      allow read: if isAuthenticated() && (resource.data.sellerId == request.auth.uid || isAdmin());
+      allow create: if isAdmin() && isValidQuoteRequest(request.resource.data) &&
+                    request.resource.data.adminId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidQuoteRequest(request.resource.data) &&
+                    request.resource.data.productId == resource.data.productId &&
+                    request.resource.data.adminId == resource.data.adminId &&
+                    request.resource.data.sellerId == resource.data.sellerId &&
+                    request.resource.data.createdAt == resource.data.createdAt &&
+                    (
+                      (resource.data.sellerId == request.auth.uid && request.resource.data.quotePrice == resource.data.quotePrice && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'counterPrice', 'counterMessage'])) ||
+                      (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'message', 'quotePrice', 'secondQuotePrice', 'secondQuoteMessage', 'counterPrice', 'counterMessage', 'iteration']))
+                    );
+      allow delete: if isAdmin();
+    }
+
+    match /transactionNotifications/{notificationId} {
+      allow read: if isAuthenticated();
+      allow create: if isSeller() && isValidTransactionNotification(request.resource.data);
+      // Notifications are immutable, but admin can delete
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (resource.data.sellerId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && (request.resource.data.sellerId == request.auth.uid || isAdmin()) && isValidTransaction(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.sellerId == request.auth.uid || isAdmin()) && isValidTransaction(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}
